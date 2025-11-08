@@ -121,7 +121,7 @@ class App(tk.Tk):
         self.themed_frame = tb.Frame(self)  # 讓 ttkbootstrap 接管
         self.themed_frame.pack(fill=tk.BOTH, expand=True)
 
-        # state
+        # 狀態初始化
         self.msgq = queue.Queue()
         self.stop_flag = False
         self.thumbnail_tk = None
@@ -289,15 +289,27 @@ class App(tk.Tk):
         # 初始隱藏 dynamic
         self._set_dynamic_visible(False)
 
-        # === FFmpeg 狀態列 ===
-        status_bar = ttk.Frame(self, padding=(12, 4))
-        status_bar.pack(fill=tk.X, side=tk.BOTTOM)
-        ttk.Label(
-            status_bar,
+        # === FFmpeg 狀態區 ===
+        ffmpeg_frame = ttk.Frame(self, padding=(12, 4))
+        ffmpeg_frame.pack(fill=tk.X, side=tk.BOTTOM)
+
+        # 顯示 FFmpeg 狀態文字
+        self.ffmpeg_label = ttk.Label(
+            ffmpeg_frame,
             textvariable=self.ffmpeg_status,
             foreground=("green" if self.ffmpeg_ok else "red"),
             font=("Segoe UI", 9, "italic")
-        ).pack(side=tk.LEFT)
+        )
+        self.ffmpeg_label.pack(side=tk.LEFT)
+
+        # 若未安裝 FFmpeg，顯示下載按鈕
+        if not self.ffmpeg_ok:
+            ttk.Button(
+                ffmpeg_frame,
+                text="Download FFmpeg",
+                command=self._download_ffmpeg,
+                style="Accent.TButton"
+            ).pack(side=tk.RIGHT, padx=(0, 8))
 
     # ------- show/hide dynamic by shadow frame -------
     def _set_dynamic_visible(self, visible: bool):
@@ -604,7 +616,47 @@ class App(tk.Tk):
             os.remove(COOKIE_FILE)
         messagebox.showinfo("clean finished", "Cookie file has finished。")
 
+    def _download_ffmpeg(self):
+        """自動下載並解壓 FFmpeg (Windows 64-bit static build)"""
+        import urllib.request, zipfile
 
+        url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+        save_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+        zip_path = os.path.join(save_dir, "ffmpeg-release-essentials.zip")
+        target_dir = os.path.join(save_dir, "ffmpeg")
+
+        try:
+            self.ffmpeg_status.set("Downloading FFmpeg, please wait...")
+            self.update_idletasks()
+
+            # 下載 zip 檔
+            urllib.request.urlretrieve(url, zip_path)
+
+            # 解壓縮
+            with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                zip_ref.extractall(target_dir)
+
+            # 找出解壓後的 bin 目錄
+            extracted_root = next(
+                (os.path.join(target_dir, d) for d in os.listdir(target_dir)
+                 if os.path.isdir(os.path.join(target_dir, d)) and "ffmpeg" in d),
+                None
+            )
+            if extracted_root:
+                bin_path = os.path.join(extracted_root, "bin")
+                self.ffmpeg_status.set(f"FFmpeg downloaded at: {bin_path}")
+                self.ffmpeg_ok = True
+                self.ffmpeg_label.configure(foreground="green")
+
+                # 讓程式馬上可用，不需重開
+                os.environ["PATH"] = bin_path + os.pathsep + os.environ["PATH"]
+            else:
+                self.ffmpeg_status.set("FFmpeg extracted but bin folder not found.")
+                self.ffmpeg_label.configure(foreground="orange")
+
+        except Exception as e:
+            self.ffmpeg_status.set(f"Download failed: {e}")
+            self.ffmpeg_label.configure(foreground="red")
 
     # Small helpers
     def _clear_thumb(self):
