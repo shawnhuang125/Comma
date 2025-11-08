@@ -8,10 +8,24 @@ from PIL import Image, ImageTk
 import requests, yt_dlp
 import json
 import shutil
-COOKIE_FILE = os.path.join(os.path.dirname(__file__), "cookies.json")
-
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "config.json")
 APP_TITLE = "X.com Audio Converter"
-
+# 載入config.json系統變數內容
+def load_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+# 儲存config.json系統變數內容
+def save_config(data):
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[Warning] Failed to save config: {e}")
 # 錯誤提示框
 def custom_yesno(title, message, yes_text="Yes", no_text="No", parent=None):
     result = {"choice": None}
@@ -93,14 +107,30 @@ class App(tk.Tk):
         # GUI 內狀態提示字串
         self.ffmpeg_status = tk.StringVar(value="Checking FFmpeg...")
 
-        # 檢查 FFmpeg 是否可用
-        ffmpeg_path = shutil.which("ffmpeg")
-        if ffmpeg_path:
-            self.ffmpeg_status.set(f"FFmpeg found at: {ffmpeg_path}")
-            self.ffmpeg_ok = True
+        # === 檢查 FFmpeg 是否可用 ===
+        self.ffmpeg_ok = False
+        self.ffmpeg_status = tk.StringVar(value="Checking FFmpeg...")
+
+        # 從 config.json 載入設定
+        self.config_data = load_config()
+        ffmpeg_path_cfg = self.config_data.get("ffmpeg_path")
+
+        # 若 config.json 有 ffmpeg_path，就優先使用
+        if ffmpeg_path_cfg and os.path.isdir(ffmpeg_path_cfg):
+            # 將該路徑加入 PATH
+            os.environ["PATH"] = ffmpeg_path_cfg + os.pathsep + os.environ["PATH"]
+            ffmpeg_exec = shutil.which("ffmpeg")
+            if ffmpeg_exec:
+                self.ffmpeg_status.set(f"FFmpeg ready (from config): {ffmpeg_exec}")
+                self.ffmpeg_ok = True
         else:
-            self.ffmpeg_status.set("FFmpeg not found. Please install FFmpeg before downloading.")
-            self.ffmpeg_ok = False
+            # 沒有設定時，自動搜尋系統路徑
+            ffmpeg_exec = shutil.which("ffmpeg")
+            if ffmpeg_exec:
+                self.ffmpeg_status.set(f"FFmpeg found at: {ffmpeg_exec}")
+                self.ffmpeg_ok = True
+            else:
+                self.ffmpeg_status.set("FFmpeg not found. Please install or click to download.")
 
 
         # 設定程式圖示（使用 PNG）
@@ -128,10 +158,13 @@ class App(tk.Tk):
         self.last_filename = None
         self.output_dir = ""
         # 載入 cookie 記錄
-        self.saved_cookie = self._load_cookie()
+        self.config_data = load_config()
+        self.saved_cookie = self.config_data.get("cookie_path", "")
         setup_style(self)
         self._build_ui()
         self.after(80, self._drain_queue)
+        # 視窗關閉時自動保存 config.json
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
     
     def _update_header_colors(self):
         """當主題切換時，自動更新 Header 顏色"""
@@ -227,13 +260,17 @@ class App(tk.Tk):
 
         self.cookie_var = tk.StringVar(value=self.saved_cookie)
         ttk.Entry(row2, textvariable=self.cookie_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row2, text="Choose File", command=self._pick_cookie).pack(side=tk.LEFT, padx=(6,2))
+        self.btn_cookie = ttk.Button(row2, text="Choose File", command=self._pick_cookie)
+        self.btn_cookie.pack(side=tk.LEFT, padx=(6,2))
         ttk.Button(row2, text="Clear", command=self._clear_cookie).pack(side=tk.LEFT, padx=(2,16))
+        # 為 tweet 錯誤提示氣泡準備定位
+        self.cookie_button_ref = self.btn_cookie
 
         ttk.Label(row2, text="Output Folder：").pack(side=tk.LEFT)
         self.outdir_var = tk.StringVar(value=self.output_dir)
         ttk.Entry(row2, textvariable=self.outdir_var, width=34).pack(side=tk.LEFT)
-        ttk.Button(row2, text="Choose Folder", command=self._pick_outdir).pack(side=tk.LEFT, padx=(8,0))
+        self.btn_choose_folder = ttk.Button(row2, text="Choose Folder", command=self._pick_outdir)
+        self.btn_choose_folder.pack(side=tk.LEFT, padx=(8,0))
 
         # 下載按鈕
         row3 = ttk.Frame(input_card); row3.pack(fill=tk.X, pady=(4,0))
@@ -289,27 +326,42 @@ class App(tk.Tk):
         # 初始隱藏 dynamic
         self._set_dynamic_visible(False)
 
-        # === FFmpeg 狀態區 ===
-        ffmpeg_frame = ttk.Frame(self, padding=(12, 4))
-        ffmpeg_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        # === FFmpeg 狀態區（與進度條同一行）===
+        ffmpeg_frame = ttk.Frame(self, padding=(12, 6))
+        ffmpeg_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(4, 2))
 
-        # 顯示 FFmpeg 狀態文字
+        # 🔹 FFmpeg 狀態文字（左側）
         self.ffmpeg_label = ttk.Label(
             ffmpeg_frame,
             textvariable=self.ffmpeg_status,
             foreground=("green" if self.ffmpeg_ok else "red"),
             font=("Segoe UI", 9, "italic")
         )
-        self.ffmpeg_label.pack(side=tk.LEFT)
+        self.ffmpeg_label.pack(side=tk.LEFT, padx=(0, 8))
 
-        # 若未安裝 FFmpeg，顯示下載按鈕
-        if not self.ffmpeg_ok:
-            ttk.Button(
-                ffmpeg_frame,
-                text="Download FFmpeg",
-                command=self._download_ffmpeg,
-                style="Accent.TButton"
-            ).pack(side=tk.RIGHT, padx=(0, 8))
+        # 🔹 FFmpeg 進度條（中間）
+        self.ffmpeg_progress = ttk.Progressbar(
+            ffmpeg_frame, orient="horizontal", length=200, mode="determinate"
+        )
+        self.ffmpeg_progress.pack(side=tk.LEFT, padx=(0, 8))
+
+        # 🔹 FFmpeg 下載按鈕（右側）
+        self.btn_ffmpeg = ttk.Button(
+            ffmpeg_frame,
+            text="Download FFmpeg",
+            command=self._download_ffmpeg,
+            style="Accent.TButton"
+        )
+        self.btn_ffmpeg.pack(side=tk.RIGHT, padx=(8, 0))
+
+        # 若 FFmpeg 已存在則立即禁用按鈕
+        if self.ffmpeg_ok:
+            self.btn_ffmpeg.configure(state=tk.DISABLED)
+
+        # 若 FFmpeg 已存在，則禁用按鈕並填滿進度條
+        if self.ffmpeg_ok:
+            self.ffmpeg_progress["value"] = 100
+            self.btn_ffmpeg.configure(state=tk.DISABLED)
 
     # ------- show/hide dynamic by shadow frame -------
     def _set_dynamic_visible(self, visible: bool):
@@ -319,12 +371,6 @@ class App(tk.Tk):
             self.dynamic_shadow.pack_forget()
 
     # ---------------- Events ----------------
-    def _pick_cookie(self):
-        p = filedialog.askopenfilename(
-            title="choose cookies.txt",
-            filetypes=[("Netscape cookies.txt", "*.txt"), ("All files", "*.*")]
-        )
-        if p: self.cookie_var.set(p)
 
     def _pick_outdir(self):
         p = filedialog.askdirectory(title="choose output folder", initialdir=self.outdir_var.get())
@@ -367,11 +413,45 @@ class App(tk.Tk):
 
     def on_download(self):
         if not self.ffmpeg_ok:
-            messagebox.showwarning(
-                "FFmpeg Missing",
-                "FFmpeg is not installed.\nPlease install it first before downloading."
+            # 若已有提示則先刪除
+            if hasattr(self, "ffmpeg_hint") and self.ffmpeg_hint.winfo_exists():
+                self.ffmpeg_hint.destroy()
+
+            # 取得 FFmpeg 按鈕位置
+            bx = self.btn_ffmpeg.winfo_rootx()
+            by = self.btn_ffmpeg.winfo_rooty()
+            bw = self.btn_ffmpeg.winfo_width()
+
+            # 建立一個小對話框
+            self.ffmpeg_hint = tk.Toplevel(self)
+            self.ffmpeg_hint.overrideredirect(True)  # 無邊框
+            self.ffmpeg_hint.attributes("-topmost", True)
+            self.ffmpeg_hint.configure(bg="#fdf2f2", padx=8, pady=6)
+
+            # 內容文字
+            msg = ttk.Label(
+                self.ffmpeg_hint,
+                text="⚠️ FFmpeg not found — click here to download.",
+                background="#fdf2f2",
+                foreground="#c9302c",
+                font=("Segoe UI", 10, "bold"),
+                cursor="hand2",
             )
-            return  # return 才會停止執行
+            msg.pack()
+            msg.bind("<Button-1>", lambda e: (self._download_ffmpeg(), self.ffmpeg_hint.destroy()))
+
+            # 更新位置（顯示在按鈕正上方）
+            self.ffmpeg_hint.update_idletasks()
+            hint_w = self.ffmpeg_hint.winfo_width()
+            hint_h = self.ffmpeg_hint.winfo_height()
+            self.ffmpeg_hint.geometry(
+                f"{hint_w}x{hint_h}+{bx + bw//2 - hint_w//2}+{by - hint_h - 10}"
+            )
+
+            # 3 秒後自動消失
+            self.ffmpeg_hint.after(3000, self.ffmpeg_hint.destroy)
+            self.bell()
+            return
 
         # 檢查 URL
         url = (self.url_var.get() or "").strip()
@@ -382,7 +462,56 @@ class App(tk.Tk):
         # 檢查輸出資料夾
         outdir = (self.outdir_var.get() or "").strip()
         if not outdir:
-            messagebox.showwarning("Missing Folder", "Please select an output folder before downloading.")
+            # 若已有提示則先刪除
+            if hasattr(self, "outdir_hint") and self.outdir_hint.winfo_exists():
+                self.outdir_hint.destroy()
+
+            # 找到「Choose Folder」按鈕
+            # 用 row2 最後一個子元件即為「Choose Folder」按鈕
+            choose_btn = None
+            for child in self.children.values():
+                pass  # 不要動這裡，後面處理
+            # 我們在 _build_ui 裡 pack() 時是這樣命名的，所以可以直接抓：
+            choose_btn = self.btn_choose_folder if hasattr(self, "btn_choose_folder") else None
+            if not choose_btn:
+                # 如果你還沒綁定 btn_choose_folder，請補上這行到 _build_ui 的地方 ↓
+                # self.btn_choose_folder = ttk.Button(row2, text="Choose Folder", command=self._pick_outdir)
+                # self.btn_choose_folder.pack(side=tk.LEFT, padx=(8,0))
+                # 然後這裡會自動抓到
+                return
+
+            bx = choose_btn.winfo_rootx()
+            by = choose_btn.winfo_rooty()
+            bw = choose_btn.winfo_width()
+
+            # 建立氣泡框
+            self.outdir_hint = tk.Toplevel(self)
+            self.outdir_hint.overrideredirect(True)
+            self.outdir_hint.attributes("-topmost", True)
+            self.outdir_hint.configure(bg="#fdf2f2", padx=8, pady=6)
+
+            msg = ttk.Label(
+                self.outdir_hint,
+                text="⚠️ Please select an output folder",
+                background="#fdf2f2",
+                foreground="#c9302c",
+                font=("Segoe UI", 10, "bold"),
+                cursor="hand2",
+            )
+            msg.pack()
+            msg.bind("<Button-1>", lambda e: (self._pick_outdir(), self.outdir_hint.destroy()))
+
+            # 顯示在按鈕正上方
+            self.outdir_hint.update_idletasks()
+            hint_w = self.outdir_hint.winfo_width()
+            hint_h = self.outdir_hint.winfo_height()
+            self.outdir_hint.geometry(
+                f"{hint_w}x{hint_h}+{bx + bw//2 - hint_w//2}+{by - hint_h - 10}"
+            )
+
+            # 自動消失
+            self.outdir_hint.after(3000, self.outdir_hint.destroy)
+            self.bell()
             return
 
         os.makedirs(outdir, exist_ok=True)
@@ -531,7 +660,15 @@ class App(tk.Tk):
             except yt_dlp.utils.DownloadCancelled:
                 self.msgq.put(("done", None))
             except Exception as e:
-                self.msgq.put(("error", f"download error：\n{e}"))
+                err_text = str(e)
+                lower_err = err_text.lower()
+
+                # 🔹 檢查是否為「No video could be found in this tweet」
+                if "no video could be found in this tweet" in lower_err:
+                    self.msgq.put(("no_tweet_video", err_text))
+                else:
+                    self.msgq.put(("error", f"download error：\n{err_text}"))
+
                 self.msgq.put(("done", None))
                 traceback.print_exc()
 
@@ -561,11 +698,76 @@ class App(tk.Tk):
                     if payload:
                         messagebox.showinfo("finished", f"download finished：\n{payload}")
                     self._reset_for_next()
+                elif kind == "no_tweet_video":
+                    # 若已有提示則先刪除
+                    if hasattr(self, "cookie_hint") and self.cookie_hint.winfo_exists():
+                        self.cookie_hint.destroy()
+
+                    # 若 UI 剛重設，延遲整體顯示以免座標變成 0
+                    def safe_show_cookie_hint():
+                        try:
+                            # 若按鈕不存在或介面被重設，直接跳過
+                            if not hasattr(self, "cookie_button_ref"):
+                                return
+                            self.update_idletasks()
+
+                            # 再建新提示框
+                            self.cookie_hint = tk.Toplevel(self)
+                            self.cookie_hint.overrideredirect(True)
+                            self.cookie_hint.withdraw()  # ← 暫時隱藏，避免先出現在左上角
+                            self.cookie_hint.attributes("-topmost", True)
+                            self.cookie_hint.configure(bg="#fdf2f2", padx=10, pady=8)
+
+                            msg = ttk.Label(
+                                self.cookie_hint,
+                                text="⚠️ Press here ⬇",
+                                background="#fdf2f2",
+                                foreground="#c9302c",
+                                font=("Segoe UI", 10, "bold"),
+                                cursor="hand2",
+                            )
+                            msg.pack()
+                            msg.bind("<Button-1>", lambda e: (self._pick_cookie(), self.cookie_hint.destroy()))
+
+                            # 第二層延遲 — 等 Tk 完全布局完成後再定位
+                            def position_hint():
+                                try:
+                                    self.update_idletasks()
+                                    bx = self.cookie_button_ref.winfo_rootx()
+                                    by = self.cookie_button_ref.winfo_rooty()
+                                    bw = self.cookie_button_ref.winfo_width()
+                                    hint_w = self.cookie_hint.winfo_width()
+                                    hint_h = self.cookie_hint.winfo_height()
+                                    x = bx + bw // 2 - hint_w // 2
+                                    y = by - hint_h - 12
+                                    self.cookie_hint.geometry(f"{hint_w}x{hint_h}+{x}+{y}")
+                                    self.cookie_hint.deiconify()  # ✅ 完全定位後再顯示
+                                    self.cookie_hint.lift()
+                                    self.cookie_hint.after(4000, self.cookie_hint.destroy)
+                                    self.bell()
+                                except Exception as e:
+                                    print("⚠️ Hint定位失敗:", e)
+
+                            # 再延遲 800ms 等 layout 穩定
+                            self.after(800, position_hint)
+
+                        except Exception as e:
+                            print("⚠️ safe_show_cookie_hint 例外:", e)
+
+                    # 🔹 延遲 1.5 秒再呼叫整體氣泡建立
+                    self.after(1500, safe_show_cookie_hint)
                 elif kind == "error":
                     messagebox.showerror("error", payload)
         except queue.Empty:
             pass
         self.after(80, self._drain_queue)
+
+    
+    def _on_close(self):
+        if messagebox.askokcancel("Exit", "Are you sure you want to close the program?"):
+            save_config(self.config_data)
+            self.destroy()
+
 
     # Reset helpers
     def _reset_dynamic_only(self):
@@ -580,21 +782,10 @@ class App(tk.Tk):
         self._reset_dynamic_only()
         self._set_dynamic_visible(False)
         self.url_entry.focus_set()
-
-    def _load_cookie(self):
-        """啟動時讀取 cookie 路徑"""
-        if os.path.exists(COOKIE_FILE):
-            try:
-                with open(COOKIE_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    return data.get("cookie_path", "")
-            except Exception:
-                return ""
-        return ""
     
     
     def _pick_cookie(self):
-        """選擇 cookie.txt 並記錄路徑"""
+        """選擇 cookie.txt 並記錄路徑到 config.json"""
         p = filedialog.askopenfilename(
             title="choose cookies.txt",
             filetypes=[("Netscape cookies.txt", "*.txt"), ("All files", "*.*")]
@@ -602,61 +793,86 @@ class App(tk.Tk):
         if not p:
             return
         self.cookie_var.set(p)
-        try:
-            with open(COOKIE_FILE, "w", encoding="utf-8") as f:
-                json.dump({"cookie_path": p}, f, ensure_ascii=False, indent=2)
-            messagebox.showinfo("successed", f"Cookie file path has stored：\n{p}")
-        except Exception as e:
-            messagebox.showerror("error", f"can not store Cookie file path：{e}")
+        # ✅ 將 cookie 路徑寫入共用設定
+        self.config_data["cookie_path"] = p
+        save_config(self.config_data)
+        messagebox.showinfo("Success", f"Cookie file path saved:\n{p}")
 
     def _clear_cookie(self):
-        """清除記錄"""
         self.cookie_var.set("")
-        if os.path.exists(COOKIE_FILE):
-            os.remove(COOKIE_FILE)
-        messagebox.showinfo("clean finished", "Cookie file has finished。")
+        if "cookie_path" in self.config_data:
+            del self.config_data["cookie_path"]
+            save_config(self.config_data)
+        messagebox.showinfo("Cleaned", "Cookie path cleared.")
 
     def _download_ffmpeg(self):
-        """自動下載並解壓 FFmpeg (Windows 64-bit static build)"""
-        import urllib.request, zipfile
+        """自動下載並解壓 FFmpeg (Windows 64-bit static build)，含即時下載進度"""
+        import urllib.request, zipfile, threading
 
         url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
         save_dir = os.path.join(os.path.expanduser("~"), "Downloads")
         zip_path = os.path.join(save_dir, "ffmpeg-release-essentials.zip")
         target_dir = os.path.join(save_dir, "ffmpeg")
 
-        try:
-            self.ffmpeg_status.set("Downloading FFmpeg, please wait...")
-            self.update_idletasks()
+        def worker():
+            try:
+                self.ffmpeg_label.configure(foreground=self.style.colors.fg)
+                self.btn_ffmpeg.configure(state=tk.DISABLED)
+                self.ffmpeg_status.set("Downloading FFmpeg (0%)")
+                self.ffmpeg_progress["value"] = 0
+                self.update_idletasks()
 
-            # 下載 zip 檔
-            urllib.request.urlretrieve(url, zip_path)
+                # 🔹 回呼函數更新進度
+                def _progress_hook(block_num, block_size, total_size):
+                    downloaded = block_num * block_size
+                    percent = min(downloaded / total_size * 100, 100) if total_size > 0 else 0
+                    mb_done = downloaded / (1024 * 1024)
+                    mb_total = total_size / (1024 * 1024)
+                    self.ffmpeg_progress["value"] = percent
+                    self.ffmpeg_status.set(f"{percent:.1f}%  ({mb_done:.1f}/{mb_total:.1f} MB)")
+                    self.update_idletasks()
 
-            # 解壓縮
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                zip_ref.extractall(target_dir)
+                urllib.request.urlretrieve(url, zip_path, _progress_hook)
 
-            # 找出解壓後的 bin 目錄
-            extracted_root = next(
-                (os.path.join(target_dir, d) for d in os.listdir(target_dir)
-                 if os.path.isdir(os.path.join(target_dir, d)) and "ffmpeg" in d),
-                None
-            )
-            if extracted_root:
-                bin_path = os.path.join(extracted_root, "bin")
-                self.ffmpeg_status.set(f"FFmpeg downloaded at: {bin_path}")
-                self.ffmpeg_ok = True
-                self.ffmpeg_label.configure(foreground="green")
+                # 解壓縮
+                self.ffmpeg_status.set("Extracting FFmpeg...")
+                self.ffmpeg_progress["value"] = 100
+                self.update_idletasks()
 
-                # 讓程式馬上可用，不需重開
-                os.environ["PATH"] = bin_path + os.pathsep + os.environ["PATH"]
-            else:
-                self.ffmpeg_status.set("FFmpeg extracted but bin folder not found.")
-                self.ffmpeg_label.configure(foreground="orange")
+                with zipfile.ZipFile(zip_path, "r") as zip_ref:
+                    zip_ref.extractall(target_dir)
 
-        except Exception as e:
-            self.ffmpeg_status.set(f"Download failed: {e}")
-            self.ffmpeg_label.configure(foreground="red")
+                # 找出解壓後的 bin 目錄
+                extracted_root = next(
+                    (os.path.join(target_dir, d) for d in os.listdir(target_dir)
+                    if os.path.isdir(os.path.join(target_dir, d)) and "ffmpeg" in d),
+                    None
+                )
+                if extracted_root:
+                    # ffmpeg的執行檔path
+                    bin_path = os.path.join(extracted_root, "bin")
+                    self.ffmpeg_status.set(f"FFmpeg ready at: {bin_path}")
+                    self.ffmpeg_ok = True
+                    self.ffmpeg_label.configure(foreground="green")
+                    # 寫入 config.json
+                    self.config_data["ffmpeg_path"] = bin_path
+                    save_config(self.config_data)
+                    # ffmpeg的執行檔path立即生效
+                    os.environ["PATH"] = bin_path + os.pathsep + os.environ["PATH"]
+                else:
+                    self.ffmpeg_status.set("Extracted, but bin folder not found.")
+                    self.ffmpeg_label.configure(foreground="orange")
+
+            except Exception as e:
+                self.ffmpeg_status.set(f"Download failed: {e}")
+                self.ffmpeg_label.configure(foreground="red")
+            finally:
+                self.btn_ffmpeg.configure(state=tk.NORMAL)
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+        # 🔹 用子執行緒避免 GUI 卡死
+        threading.Thread(target=worker, daemon=True).start()
+
 
     # Small helpers
     def _clear_thumb(self):
