@@ -1,4 +1,5 @@
 {
-  "ffmpeg_path": "ffmpeg\\ffmpeg-8.0-essentials_build\\bin",
-  "icon_path": "assets/repost.png"
+  "ffmpeg_path": "ffmpeg\\ffmpeg-8.0.1-essentials_build\\bin",
+  "icon_path": "assets/repost.png",
+  "cookie_path": "C:/Users/s0909/OneDrive/桌面/x.com_cookies .txt"
 }

@@ -3,3 +3,7 @@ venv/
 env/
 .venv/
 myenv/
+
+# ignore python gui package
+build/
+dist/
