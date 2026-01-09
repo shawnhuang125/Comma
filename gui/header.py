@@ -15,14 +15,14 @@ def create_header(parent, style, on_theme_change):
     title_frame.pack(side=tk.LEFT, anchor="w")
 
     title_label = ttk.Label(
-        title_frame, text="x.com Audio Converter",
+        title_frame, text="Multi-Platform Media Converter",
         font=("Segoe UI", 14, "bold")
     )
     title_label.pack(anchor="w")
 
     subtitle_label = ttk.Label(
         title_frame,
-        text="Preview and progress shown; auto-clear on completion.",
+        text="Supports X.com, YouTube, and more. Preview and progress shown.",
         font=("Segoe UI", 9)
     )
     subtitle_label.pack(anchor="w")

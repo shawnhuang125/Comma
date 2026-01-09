@@ -4,8 +4,8 @@
 a = Analysis(
     ['app.py'],
     pathex=[],
-    binaries=[],
-    datas=[('assets', 'assets'), ('utils/config.json', 'utils')],
+    binaries=[('ffmpeg.exe', '.')],
+    datas=[('assets', 'assets')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -35,5 +35,4 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['assets\\repost.png'],
 )

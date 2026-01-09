@@ -1,4 +1,7 @@
+# /twitter_gui_downloader/utils/helpers.py
 from tkinter import ttk
+import os
+import sys
 
 def make_card(parent, pad=14):
     shadow = ttk.Frame(parent, style="Shadow.TFrame")
@@ -48,3 +51,9 @@ def hr_eta(eta):
     if m:
         return f"{m:d}m {s:02d}s"
     return f"{s:d}s"
+
+def get_resource_path(relative_path):
+    """ 取得資源的絕對路徑 (支援 PyInstaller 打包後的 _MEIPASS) """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)

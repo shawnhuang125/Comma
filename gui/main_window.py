@@ -4,13 +4,14 @@ from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
 import requests, yt_dlp
 
-# ✅ 匯入共用工具模組
+# 匯入共用工具模組
 from utils.config_manager import load_config, save_config
-from utils.dialogs import custom_yesno
-from utils.helpers import make_card
+from utils.dialogs import custom_yesno, ask_overwrite_or_rename
+from utils.helpers import make_card, get_resource_path
 from utils.style import setup_style
 
-APP_TITLE = "X.com Audio Converter"
+
+APP_TITLE = "Universal Media Downloader"
 
 # GUI APPLICATION初始化與運行
 class App(tk.Tk):
@@ -18,72 +19,56 @@ class App(tk.Tk):
         super().__init__()
         self.temp_files = []  # 記錄正在下載的暫存檔 (.part)
         self.title(APP_TITLE)
-        # GUI 內狀態提示字串
-        self.ffmpeg_status = tk.StringVar(value="Checking FFmpeg...")
-
-        # === 檢查 FFmpeg 是否可用 ===
-        self.ffmpeg_ok = False
-        self.ffmpeg_status = tk.StringVar(value="Checking FFmpeg...")
-
-        # 從 config.json 載入設定
+        # 必須放在最前面，因為後面的 Icon 和 FFmpeg 檢查可能都會用到它
         self.config_data = load_config()
-        ffmpeg_path_cfg = self.config_data.get("ffmpeg_path")
 
-        # 若 config.json 有 ffmpeg_path，就優先使用
-        if ffmpeg_path_cfg and os.path.isdir(ffmpeg_path_cfg):
-            # 將該路徑加入 PATH
-            os.environ["PATH"] = ffmpeg_path_cfg + os.pathsep + os.environ["PATH"]
-            ffmpeg_exec = shutil.which("ffmpeg")
-            if ffmpeg_exec:
-                self.ffmpeg_status.set(f"FFmpeg ready (from config): {ffmpeg_exec}")
-                self.ffmpeg_ok = True
+        # === [修改] 檢查 FFmpeg (優先使用打包好的檔案) ===
+        self.ffmpeg_ok = False
+        self.ffmpeg_status = tk.StringVar(value="Checking bundled FFmpeg...")
+
+        # 1. 取得資源路徑 (支援開發環境與打包後的環境)
+        target_ffmpeg = get_resource_path("ffmpeg.exe")
+
+        if os.path.exists(target_ffmpeg):
+            self.ffmpeg_ok = True
+            self.ffmpeg_status.set(f"Ready (Bundled): {target_ffmpeg}")
+            
+            # 關鍵：將 ffmpeg 所在資料夾加入環境變數 PATH
+            # 這樣 yt-dlp 執行時就能直接呼叫到 ffmpeg
+            ffmpeg_dir = os.path.dirname(target_ffmpeg)
+            os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ["PATH"]
+            print(f"✅ Bundled FFmpeg found: {target_ffmpeg}")
         else:
-            # 沒有設定時，自動搜尋系統路徑
-            ffmpeg_exec = shutil.which("ffmpeg")
-            if ffmpeg_exec:
-                self.ffmpeg_status.set(f"FFmpeg found at: {ffmpeg_exec}")
+            # 2. 如果開發環境還沒放 exe，嘗試找電腦系統內建的 (備用)
+            ffmpeg_sys = shutil.which("ffmpeg")
+            if ffmpeg_sys:
                 self.ffmpeg_ok = True
+                self.ffmpeg_status.set(f"Ready (System): {ffmpeg_sys}")
             else:
-                self.ffmpeg_status.set("FFmpeg not found. Please install or click to download.")
+                self.ffmpeg_status.set("Error: FFmpeg not found.")
+                print("❌ Critical: No FFmpeg found.")
 
 
         # 設定程式圖示（使用 PNG）
         # === 設定程式圖示（從 config.json 載入） ===
         try:
-            icon_cfg = self.config_data.get("icon_path", "assets/repost.png")
+            # 1. 預設使用打包在內部的圖片 (使用 get_resource_path 確保打包後找得到)
+            # 注意：這裡假設你的圖片放在專案根目錄下的 assets 資料夾
+            icon_path = get_resource_path(os.path.join("assets", "repost.png"))
+            
+            # 2. (選用) 如果你想支援 Config 自訂圖示，可以加這段覆蓋
+            custom_icon = self.config_data.get("icon_path")
+            if custom_icon and os.path.exists(custom_icon):
+                icon_path = custom_icon
 
-            # 若為相對路徑，轉為絕對路徑（相對於專案根目錄）
-            if not os.path.isabs(icon_cfg):
-                base_dir = os.path.dirname(os.path.dirname(__file__))  # 回到專案根目錄
-                icon_path = os.path.join(base_dir, icon_cfg)
+            # 3. 執行載入
+            if os.path.exists(icon_path):
+                icon_img = tk.PhotoImage(file=icon_path)
+                self.iconphoto(True, icon_img)
+                self._icon_img = icon_img 
+                print(f"✅ Loaded icon from: {icon_path}")
             else:
-                icon_path = icon_cfg
-
-            if not os.path.exists(icon_path):
-                default_icon = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets/repost.png")
-                if os.path.exists(default_icon):
-                    icon_path = default_icon
-                    self.config_data["icon_path"] = "assets/repost.png"
-                    save_config(self.config_data)
-                else:
-                    print("⚠️ No icon found. Skipped setting icon.")
-                    icon_path = None
-
-            if icon_path:
-                icon_img = tk.PhotoImage(file=icon_path)
-                self.iconphoto(True, icon_img)
-                self._icon_img = icon_img  # 保留引用避免被回收
-                print(f"✅ Loaded icon from: {icon_path}")
-
-        except Exception as e:
-            print(f"⚠️ Failed to load icon: {e}")
-
-            # 4️⃣ 載入圖示
-            if icon_path:
-                icon_img = tk.PhotoImage(file=icon_path)
-                self.iconphoto(True, icon_img)
-                self._icon_img = icon_img  # 保留引用，防止回收
-                print(f"✅ Loaded icon from: {icon_path}")
+                print(f"⚠️ Icon not found at: {icon_path}")
 
         except Exception as e:
             print(f"⚠️ Failed to load icon: {e}")
@@ -139,14 +124,14 @@ class App(tk.Tk):
         self.title_frame.pack(side=tk.LEFT, anchor="w")
 
         self.title_label = ttk.Label(
-            self.title_frame, text="x.com Audio Converter",
+            self.title_frame, text="Multi-Platform Media Converter",
             font=("Segoe UI", 14, "bold")
         )
         self.title_label.pack(anchor="w")
 
         self.subtitle_label = ttk.Label(
             self.title_frame,
-            text="Preview and progress shown; auto-clear on completion.",
+            text="Supports X.com, YouTube, and more. Preview and progress shown.",
             font=("Segoe UI", 9)
         )
         self.subtitle_label.pack(anchor="w")
@@ -216,12 +201,20 @@ class App(tk.Tk):
         self.btn_choose_folder = ttk.Button(row2, text="Choose Folder", command=self._pick_outdir)
         self.btn_choose_folder.pack(side=tk.LEFT, padx=(8,0))
 
-        # 下載按鈕
         row3 = ttk.Frame(input_card); row3.pack(fill=tk.X, pady=(4,0))
+        # 下載MP4按鈕
         self.btn_download = ttk.Button(row3, text="Download MP4",
-                                       command=self.on_download, style="Accent.TButton")
+                               command=lambda: self.on_download(as_mp3=False), 
+                               style="Accent.TButton")
         #停止按鈕
         self.btn_download.pack(side=tk.LEFT)
+
+        # Download MP3 按鈕 (指定 as_mp3=True)
+        self.btn_download_mp3 = ttk.Button(row3, text="Download MP3",
+                                        command=lambda: self.on_download(as_mp3=True), 
+                                        style="success.TButton")
+        self.btn_download_mp3.pack(side=tk.LEFT, padx=(8,0))
+
         self.btn_stop = ttk.Button(row3, text="Stop",
                                    command=self.on_stop, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT, padx=(8,0))
@@ -269,43 +262,6 @@ class App(tk.Tk):
 
         # 初始隱藏 dynamic
         self._set_dynamic_visible(False)
-
-        # === FFmpeg 狀態區（與進度條同一行）===
-        ffmpeg_frame = ttk.Frame(self, padding=(12, 6))
-        ffmpeg_frame.pack(fill=tk.X, side=tk.BOTTOM, pady=(4, 2))
-
-        # 🔹 FFmpeg 狀態文字（左側）
-        self.ffmpeg_label = ttk.Label(
-            ffmpeg_frame,
-            textvariable=self.ffmpeg_status,
-            foreground=("green" if self.ffmpeg_ok else "red"),
-            font=("Segoe UI", 9, "italic")
-        )
-        self.ffmpeg_label.pack(side=tk.LEFT, padx=(0, 8))
-
-        # 🔹 FFmpeg 進度條（中間）
-        self.ffmpeg_progress = ttk.Progressbar(
-            ffmpeg_frame, orient="horizontal", length=200, mode="determinate"
-        )
-        self.ffmpeg_progress.pack(side=tk.LEFT, padx=(0, 8))
-
-        # 🔹 FFmpeg 下載按鈕（右側）
-        self.btn_ffmpeg = ttk.Button(
-            ffmpeg_frame,
-            text="Download FFmpeg",
-            command=self._download_ffmpeg,
-            style="Accent.TButton"
-        )
-        self.btn_ffmpeg.pack(side=tk.RIGHT, padx=(8, 0))
-
-        # 若 FFmpeg 已存在則立即禁用按鈕
-        if self.ffmpeg_ok:
-            self.btn_ffmpeg.configure(state=tk.DISABLED)
-
-        # 若 FFmpeg 已存在，則禁用按鈕並填滿進度條
-        if self.ffmpeg_ok:
-            self.ffmpeg_progress["value"] = 100
-            self.btn_ffmpeg.configure(state=tk.DISABLED)
 
     # ------- show/hide dynamic by shadow frame -------
     def _set_dynamic_visible(self, visible: bool):
@@ -355,47 +311,19 @@ class App(tk.Tk):
         else:
             messagebox.showinfo("Download Stopped", "Download stopped. No temp files found.")
 
-    def on_download(self):
+    def on_download(self, as_mp3=False):
         if not self.ffmpeg_ok:
             # 若已有提示則先刪除
             if hasattr(self, "ffmpeg_hint") and self.ffmpeg_hint.winfo_exists():
                 self.ffmpeg_hint.destroy()
 
-            # 取得 FFmpeg 按鈕位置
-            bx = self.btn_ffmpeg.winfo_rootx()
-            by = self.btn_ffmpeg.winfo_rooty()
-            bw = self.btn_ffmpeg.winfo_width()
-
-            # 建立一個小對話框
-            self.ffmpeg_hint = tk.Toplevel(self)
-            self.ffmpeg_hint.overrideredirect(True)  # 無邊框
-            self.ffmpeg_hint.attributes("-topmost", True)
-            self.ffmpeg_hint.configure(bg="#fdf2f2", padx=8, pady=6)
-
-            # 內容文字
-            msg = ttk.Label(
-                self.ffmpeg_hint,
-                text="⚠️ FFmpeg not found — click here to download.",
-                background="#fdf2f2",
-                foreground="#c9302c",
-                font=("Segoe UI", 10, "bold"),
-                cursor="hand2",
-            )
-            msg.pack()
-            msg.bind("<Button-1>", lambda e: (self._download_ffmpeg(), self.ffmpeg_hint.destroy()))
-
-            # 更新位置（顯示在按鈕正上方）
-            self.ffmpeg_hint.update_idletasks()
-            hint_w = self.ffmpeg_hint.winfo_width()
-            hint_h = self.ffmpeg_hint.winfo_height()
-            self.ffmpeg_hint.geometry(
-                f"{hint_w}x{hint_h}+{bx + bw//2 - hint_w//2}+{by - hint_h - 10}"
-            )
-
-            # 3 秒後自動消失
-            self.ffmpeg_hint.after(3000, self.ffmpeg_hint.destroy)
-            self.bell()
-            return
+            if not self.ffmpeg_ok:
+                messagebox.showerror(
+                    "Error", 
+                    "FFmpeg component is missing.\n\n"
+                    "The application cannot find 'ffmpeg.exe'. Please ensure the application is installed correctly."
+                )
+                return
 
         # 檢查 URL
         url = (self.url_var.get() or "").strip()
@@ -462,37 +390,43 @@ class App(tk.Tk):
 
         # 檢查是否已有同名影片
         try:
+            # 根據點擊模式切換檢查的副檔名
+            current_ext = "mp3" if as_mp3 else "mp4"
+            
             info_opts = {
                 "quiet": True,
                 "no_warnings": True,
                 "cookiefile": self.cookie_var.get().strip() or None,
                 "noplaylist": True,
-                # 加上完整 outtmpl 與 paths
-                "outtmpl": "%(title)s.%(ext)s",
-                "paths": {"home": outdir},  # 關鍵：讓 prepare_filename 指向正確資料夾
+                "outtmpl": f"%(title)s.{current_ext}", # 修改這裡
+                "paths": {"home": outdir},
             }
 
             with yt_dlp.YoutubeDL(info_opts) as y:
                 info = y.extract_info(url, download=False)
                 expected_name = y.prepare_filename(info)
 
-            # 現在 expected_name 一定是實際路徑，例如 D:\Downloads\myvideo.mp4
+            # 定義基礎模板，稍後可能會被修改 (如果使用者選擇 Rename)
+            final_outtmpl = os.path.join(outdir, "%(title)s.%(ext)s")
+
             if os.path.exists(expected_name):
-                ans = custom_yesno(
-                    "File has already exists.",
-                    f"Detected the same file:\n\n{os.path.basename(expected_name)}\n\nDo you want to overwrite this file?",
-                    yes_text="overwrite",
-                    no_text="cancel",
-                    parent=self   # 指定父視窗
-                )
-                if not ans:
-                    return  # 使用者選擇取消
-                else:
-                    try: 
+                # 呼叫新的對話視窗，接收 (動作, 後綴)
+                action, suffix = ask_overwrite_or_rename(self, expected_name)
+
+                if action == "cancel":
+                    return  # 取消下載
+                
+                elif action == "overwrite":
+                    try:
                         os.remove(expected_name)
                     except Exception as e:
                         messagebox.showerror("Error", f"Cannot delete old file:\n{e}")
                         return
+                
+                elif action == "rename":
+                    # 使用者選擇重新命名，修改檔名模板
+                    # 例如:原本是 "%(title)s.%(ext)s" -> 變成 "%(title)s_1.%(ext)s"
+                    final_outtmpl = os.path.join(outdir, f"%(title)s{suffix}.%(ext)s")
         except Exception as e:
             print(f"File pre-check failed: {e}")
 
@@ -502,11 +436,15 @@ class App(tk.Tk):
         # reset for a run
         self.stop_flag = False
         self.btn_download.configure(state=tk.DISABLED)
+        self.btn_download_mp3.configure(state=tk.DISABLED) # 禁用 MP3 按鈕
         self.btn_stop.configure(state=tk.NORMAL)
+        
+        # 在啟動執行緒時，將 as_mp3 傳入 worker
+        threading.Thread(target=lambda: worker(as_mp3), daemon=True).start()
         self._reset_dynamic_only()
         self._set_dynamic_visible(True)
 
-        def worker():
+        def worker(is_audio_only):
             final_path = None
             try:
                 def progress_hook(d):
@@ -549,6 +487,7 @@ class App(tk.Tk):
                         # 清空暫存檔紀錄（因為已成功完成下載）
                         self.temp_files.clear()
 
+                cookie_path = self.cookie_var.get().strip() or None
                 # info (inside download flow)
                 info_opts = {
                     "quiet": True, "no_warnings": True,
@@ -564,9 +503,9 @@ class App(tk.Tk):
                 thumb = info.get("thumbnail")
 
                 self.msgq.put(("meta", {
-                    "title": title,
-                    "uploader": uploader,
-                    "duration": self._human_duration(duration)
+                    "title": info.get("title") or "—",
+                    "uploader": info.get("uploader") or info.get("channel") or "—",
+                    "duration": self._human_duration(info.get("duration"))
                 }))
 
                 if thumb:
@@ -579,25 +518,43 @@ class App(tk.Tk):
                 else:
                     self.msgq.put(("thumb", None))
 
-                # real download
-                ydl_opts = {
-                    "outtmpl": os.path.join(outdir, "%(title)s.%(ext)s"),
-                    "cookiefile": self.cookie_var.get().strip() or None,
-                    "noplaylist": True,
-                    "merge_output_format": "mp4",
-                    "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-                    "progress_hooks": [progress_hook],
-                    "postprocessors": [
-                        {"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"},
-                        {"key": "FFmpegMetadata"},
-                    ],
-                    "quiet": True, "no_warnings": True,
-                }
+                if is_audio_only:
+                    ydl_opts = {
+                        "outtmpl": final_outtmpl.replace(".%(ext)s", ".mp3"), # 確保檔名後綴
+                        "cookiefile": cookie_path,
+                        "noplaylist": True,
+                        "format": "bestaudio/best",
+                        "progress_hooks": [progress_hook],
+                        "postprocessors": [{
+                            "key": "FFmpegExtractAudio",
+                            "preferredcodec": "mp3",
+                            "preferredquality": "192",
+                        }, {"key": "FFmpegMetadata"}],
+                        "quiet": True, "no_warnings": True,
+                    }
+                else:
+                    ydl_opts = {
+                        "outtmpl": final_outtmpl,
+                        "cookiefile": cookie_path,
+                        "noplaylist": True,
+                        "merge_output_format": "mp4",
+                        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                        "progress_hooks": [progress_hook],
+                        "postprocessors": [
+                            {"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"},
+                            {"key": "FFmpegMetadata"},
+                        ],
+                        "quiet": True, "no_warnings": True,
+                    }
+
+                # 根據下載模式決定檢查的副檔名
+                check_ext = "mp3" if as_mp3 else "mp4"
+                info_opts["outtmpl"] = f"%(title)s.{check_ext}" # 修改檢查用的模板
+                
                 with yt_dlp.YoutubeDL(ydl_opts) as y:
-                    info2 = y.extract_info(url, download=True)
-                    fn = y.prepare_filename(info2)
-                    base, _ = os.path.splitext(fn)
-                    final_path = base + ".mp4"
+                    y.process_info(info)
+                    fn = y.prepare_filename(info)
+                    final_path = os.path.splitext(fn)[0] + (".mp3" if is_audio_only else ".mp4")
 
                 self.msgq.put(("done", final_path))
 
@@ -616,7 +573,7 @@ class App(tk.Tk):
                 self.msgq.put(("done", None))
                 traceback.print_exc()
 
-        threading.Thread(target=worker, daemon=True).start()
+        threading.Thread(target=lambda: worker(as_mp3), daemon=True).start()
 
     # 下載佇列
     def _drain_queue(self):
@@ -638,6 +595,7 @@ class App(tk.Tk):
                         self.file_var.set(f"filename：{payload['filename']}")
                 elif kind == "done":
                     self.btn_download.configure(state=tk.NORMAL)
+                    self.btn_download_mp3.configure(state=tk.NORMAL)
                     self.btn_stop.configure(state=tk.DISABLED)
                     if payload:
                         messagebox.showinfo("finished", f"download finished：\n{payload}")
@@ -702,6 +660,9 @@ class App(tk.Tk):
                     self.after(1500, safe_show_cookie_hint)
                 elif kind == "error":
                     messagebox.showerror("error", payload)
+                    self.btn_download.configure(state=tk.NORMAL)
+                    self.btn_download_mp3.configure(state=tk.NORMAL)
+                    self.btn_stop.configure(state=tk.DISABLED)
         except queue.Empty:
             pass
         self.after(80, self._drain_queue)
@@ -748,86 +709,6 @@ class App(tk.Tk):
             del self.config_data["cookie_path"]
             save_config(self.config_data)
         messagebox.showinfo("Cleaned", "Cookie path cleared.")
-
-    def _download_ffmpeg(self):
-        """自動下載並解壓 FFmpeg (存放於應用程式所在目錄)，含即時下載進度"""
-        import urllib.request, zipfile, threading
-
-        url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
-
-        # 取得應用程式的根目錄（即 app.exe 所在資料夾）
-        if getattr(sys, 'frozen', False):  # PyInstaller 打包後
-            base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            base_dir = os.path.dirname(base_dir)  # 回到專案根目錄
-
-        save_dir = base_dir  # 直接存在同目錄
-        zip_path = os.path.join(save_dir, "ffmpeg-release-essentials.zip")
-        target_dir = os.path.join(save_dir, "ffmpeg")
-
-        def worker():
-            try:
-                self.ffmpeg_label.configure(foreground=self.style.colors.fg)
-                self.btn_ffmpeg.configure(state=tk.DISABLED)
-                self.ffmpeg_status.set("Downloading FFmpeg (0%)")
-                self.ffmpeg_progress["value"] = 0
-                self.update_idletasks()
-
-                # 🔹 回呼函數更新進度
-                def _progress_hook(block_num, block_size, total_size):
-                    downloaded = block_num * block_size
-                    percent = min(downloaded / total_size * 100, 100) if total_size > 0 else 0
-                    mb_done = downloaded / (1024 * 1024)
-                    mb_total = total_size / (1024 * 1024)
-                    self.ffmpeg_progress["value"] = percent
-                    self.ffmpeg_status.set(f"{percent:.1f}%  ({mb_done:.1f}/{mb_total:.1f} MB)")
-                    self.update_idletasks()
-
-                urllib.request.urlretrieve(url, zip_path, _progress_hook)
-
-                # 解壓縮
-                self.ffmpeg_status.set("Extracting FFmpeg...")
-                self.ffmpeg_progress["value"] = 100
-                self.update_idletasks()
-
-                with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                    zip_ref.extractall(target_dir)
-
-                # 找出解壓後的 bin 目錄
-                extracted_root = next(
-                    (os.path.join(target_dir, d) for d in os.listdir(target_dir)
-                    if os.path.isdir(os.path.join(target_dir, d)) and "ffmpeg" in d),
-                    None
-                )
-                if extracted_root:
-                    bin_path = os.path.join(extracted_root, "bin")
-                    self.ffmpeg_status.set(f"FFmpeg ready at: {bin_path}")
-                    self.ffmpeg_ok = True
-                    self.ffmpeg_label.configure(foreground="green")
-
-                    # ✅ 寫入 config.json 為相對路徑
-                    rel_bin_path = os.path.relpath(bin_path, base_dir)
-                    self.config_data["ffmpeg_path"] = rel_bin_path
-                    save_config(self.config_data)
-
-                    # ✅ 加入 PATH
-                    os.environ["PATH"] = bin_path + os.pathsep + os.environ["PATH"]
-                else:
-                    self.ffmpeg_status.set("Extracted, but bin folder not found.")
-                    self.ffmpeg_label.configure(foreground="orange")
-
-            except Exception as e:
-                self.ffmpeg_status.set(f"Download failed: {e}")
-                self.ffmpeg_label.configure(foreground="red")
-            finally:
-                self.btn_ffmpeg.configure(state=tk.NORMAL)
-                if os.path.exists(zip_path):
-                    os.remove(zip_path)
-
-        # 🔹 用子執行緒避免 GUI 卡死
-        threading.Thread(target=worker, daemon=True).start()
-
 
     # Small helpers
     def _clear_thumb(self):

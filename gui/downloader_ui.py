@@ -37,6 +37,16 @@ def create_downloader_ui(container, app):
     app.btn_download = ttk.Button(row3, text="Download MP4",
                                   command=app.on_download, style="Accent.TButton")
     app.btn_download.pack(side=tk.LEFT)
+    # Download MP3
+    app.btn_download_mp3 = ttk.Button(
+        row3, 
+        text="Download MP3",
+        command=lambda: app.on_download(as_mp3=True),
+        style="Accent.TButton"  
+    )
+    app.btn_download_mp3.pack(side=tk.LEFT, padx=(8,0))
+
+
     app.btn_stop = ttk.Button(row3, text="Stop",
                               command=app.on_stop, state=tk.DISABLED)
     app.btn_stop.pack(side=tk.LEFT, padx=(8,0))
