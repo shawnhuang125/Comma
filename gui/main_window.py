@@ -296,7 +296,7 @@ class App(tk.Tk):
         removed = []
         for f in list(self.temp_files):
             try:
-                for ext in ["", ".part", ".ytdl", ".temp", ".temp.mp4"]:
+                for ext in ["", ".part", ".ytdl", ".temp", ".temp.mp4",".f*"]:
                     temp_path = f + ext
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
@@ -439,8 +439,7 @@ class App(tk.Tk):
         self.btn_download_mp3.configure(state=tk.DISABLED) # 禁用 MP3 按鈕
         self.btn_stop.configure(state=tk.NORMAL)
         
-        # 在啟動執行緒時，將 as_mp3 傳入 worker
-        threading.Thread(target=lambda: worker(as_mp3), daemon=True).start()
+        
         self._reset_dynamic_only()
         self._set_dynamic_visible(True)
 
@@ -518,8 +517,11 @@ class App(tk.Tk):
                 else:
                     self.msgq.put(("thumb", None))
 
+                ffmpeg_path = get_resource_path("ffmpeg.exe") if self.ffmpeg_ok else shutil.which("ffmpeg")
+
                 if is_audio_only:
                     ydl_opts = {
+                        "ffmpeg_location": ffmpeg_path, # <--- 明確加入這行
                         "outtmpl": final_outtmpl.replace(".%(ext)s", ".mp3"), # 確保檔名後綴
                         "cookiefile": cookie_path,
                         "noplaylist": True,
@@ -534,17 +536,31 @@ class App(tk.Tk):
                     }
                 else:
                     ydl_opts = {
+                        "ffmpeg_location": ffmpeg_path,
                         "outtmpl": final_outtmpl,
                         "cookiefile": cookie_path,
                         "noplaylist": True,
-                        "merge_output_format": "mp4",
-                        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                        # 1. 抓取最佳影音，不強硬鎖死編碼 (讓 X 的片段能順利合併)
+                        "format": "bestvideo+bestaudio/best",
                         "progress_hooks": [progress_hook],
                         "postprocessors": [
-                            {"key": "FFmpegVideoRemuxer", "preferedformat": "mp4"},
+                            {
+                                "key": "FFmpegVideoConvertor",
+                                "preferedformat": "mp4", # 確保最終轉成 mp4 容器
+                            },
                             {"key": "FFmpegMetadata"},
                         ],
-                        "quiet": True, "no_warnings": True,
+                        # 2. 關鍵修正：改用 -c copy 模式
+                        # 這不會重新運算每一幀(Encoding)，而是直接把下載的數據封裝進 MP4
+                        # 對於 X 這種片段多且速度慢的平台，這樣最穩定且快 10 倍
+                        "postprocessor_args": {
+                            "video_convertor": [
+                                "-c", "copy", 
+                                "-movflags", "faststart"
+                            ]
+                        },
+                        "quiet": True,
+                        "no_warnings": True,
                     }
 
                 # 根據下載模式決定檢查的副檔名
@@ -554,26 +570,50 @@ class App(tk.Tk):
                 with yt_dlp.YoutubeDL(ydl_opts) as y:
                     y.process_info(info)
                     fn = y.prepare_filename(info)
-                    final_path = os.path.splitext(fn)[0] + (".mp3" if is_audio_only else ".mp4")
+                # 取得不含副檔名的基礎路徑，用來精準偵測最終產出的檔案
+                base_path = os.path.splitext(fn)[0]
 
+                if is_audio_only:
+                    # 音訊模式：優先檢查是否成功產出 .mp3
+                    potential_mp3 = base_path + ".mp3"
+                    if os.path.exists(potential_mp3):
+                        final_path = potential_mp3
+                    else:
+                        final_path = fn
+                else:
+                    # 影片模式：這是解決你問題的核心
+                    # 優先序 1：檢查轉檔後的 .mp4 是否存在 (解決 webm/mp4 並存問題)
+                    potential_mp4 = base_path + ".mp4"
+                    if os.path.exists(potential_mp4):
+                        final_path = potential_mp4
+                    # 優先序 2：如果沒有 mp4，檢查原始預期檔名是否存在
+                    elif os.path.exists(fn):
+                        final_path = fn
+                    else:
+                        # 兜底：如果都沒找到，維持原檔名
+                        final_path = fn
+
+                # ✅ 關鍵：這行必須在 try 區塊的最末尾，確保不論如何都會發送 done 訊號
                 self.msgq.put(("done", final_path))
 
             except yt_dlp.utils.DownloadCancelled:
+                # 使用者取消下載，傳送 None 觸發 UI 重設但不彈通知
                 self.msgq.put(("done", None))
             except Exception as e:
+                # 發生錯誤，傳送錯誤資訊後觸發 UI 重設
                 err_text = str(e)
-                lower_err = err_text.lower()
-
-                # 🔹 檢查是否為「No video could be found in this tweet」
-                if "no video could be found in this tweet" in lower_err:
+                if "no video could be found in this tweet" in err_text.lower():
                     self.msgq.put(("no_tweet_video", err_text))
                 else:
                     self.msgq.put(("error", f"download error：\n{err_text}"))
-
+                
+                # ✅ 錯誤發生也要傳送 done，UI 才會解除按鈕鎖定
                 self.msgq.put(("done", None))
                 traceback.print_exc()
-
+        # 在啟動執行緒時，將 as_mp3 傳入 worker
         threading.Thread(target=lambda: worker(as_mp3), daemon=True).start()
+
+        
 
     # 下載佇列
     def _drain_queue(self):
