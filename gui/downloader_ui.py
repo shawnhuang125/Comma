@@ -42,7 +42,7 @@ def create_downloader_ui(container, app):
         row3, 
         text="Download MP3",
         command=lambda: app.on_download(as_mp3=True),
-        style="Accent.TButton"  
+        style="Accent.TButton"  # <--- 這裡改成 Accent.TButton 就會變藍色了
     )
     app.btn_download_mp3.pack(side=tk.LEFT, padx=(8,0))
 

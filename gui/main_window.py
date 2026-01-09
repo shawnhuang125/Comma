@@ -212,7 +212,7 @@ class App(tk.Tk):
         # Download MP3 按鈕 (指定 as_mp3=True)
         self.btn_download_mp3 = ttk.Button(row3, text="Download MP3",
                                         command=lambda: self.on_download(as_mp3=True), 
-                                        style="success.TButton")
+                                        style="Accent.TButton")
         self.btn_download_mp3.pack(side=tk.LEFT, padx=(8,0))
 
         self.btn_stop = ttk.Button(row3, text="Stop",
