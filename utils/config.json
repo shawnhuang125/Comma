@@ -1,4 +1,5 @@
 {
   "ffmpeg_path": "ffmpeg\\ffmpeg-8.0.1-essentials_build\\bin",
-  "icon_path": "assets/repost.png"
+  "icon_path": "assets/repost.png",
+  "language": "en"
 }

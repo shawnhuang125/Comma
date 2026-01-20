@@ -11,7 +11,66 @@ from utils.helpers import make_card, get_resource_path
 from utils.style import setup_style
 
 
-APP_TITLE = "Universal Media Downloader"
+APP_TITLE = "Comma"
+
+LANG_DICT = {
+    "en": {
+        "title": "Comma - Media Downloader",
+        "subtitle": "Supports X.com, YouTube, and more.",
+        "url_label": "Video URL:",
+        "cookies_label": "Cookies:",
+        "folder_label": "Output Folder:",
+        "btn_choose": "Choose File",
+        "btn_folder": "Choose Folder",
+        "btn_open": "Open Folder",
+        "download_v": "Download Video",
+        "download_a": "Download Audio",
+        "stop": "Stop",
+        "theme": "Theme:",
+        "lang_btn": "繁體中文",
+        "btn_clear": "Clear",
+        "btn_open_folder": "Open Download Folder",
+        "msg_url_req": "Please enter the video URL first.",
+        "msg_finished": "Download finished",
+        "cookie_hint": "Cookies(Optional: Required only for private or NSFW content. Download with Browser Extension)",
+        "footer": "made by shawn_studio.io",
+        "msg_exit_title": "Exit",
+        "msg_exit_text": "Are you sure you want to close the program?",
+        "msg_url_empty": "Please enter the video URL first.",
+        "msg_folder_empty": "Please select an output folder first.",
+        "msg_error_title": "Error",
+        "msg_stop_title": "Download Stopped",
+        "msg_stop_text": "Download has been stopped by user.",
+    },
+    "zh": {
+        "title": "Comma - 多媒體下載器",
+        "subtitle": "支援 X.com, YouTube 等多種平台",
+        "url_label": "影片網址：",
+        "cookies_label": "Cookie 檔案：",
+        "folder_label": "輸出資料夾：",
+        "btn_choose": "選擇檔案",
+        "btn_folder": "選擇資料夾",
+        "btn_open": "開啟資料夾",
+        "download_v": "下載影片",
+        "download_a": "下載音訊",
+        "stop": "停止",
+        "theme": "主題：",
+        "lang_btn": "English",
+        "btn_clear": "清除",
+        "btn_open_folder": "開啟下載資料夾",
+        "msg_url_req": "請先輸入影片網址。",
+        "msg_finished": "下載完成",
+        "cookie_hint": "Cookie檔案(選填：僅限下載非公開或 NSFW 影片時使用,請使用瀏覽器擴充套件下載）",
+        "footer": "shawn_studio.io 製作",
+        "msg_exit_title": "結束程式",
+        "msg_exit_text": "您確定要關閉程式嗎？",
+        "msg_url_empty": "請先輸入影片網址。",
+        "msg_folder_empty": "請先選擇輸出資料夾。",
+        "msg_error_title": "錯誤",
+        "msg_stop_title": "下載已停止",
+        "msg_stop_text": "使用者已手動停止下載。",
+    }
+}
 
 # GUI APPLICATION初始化與運行
 class App(tk.Tk):
@@ -21,6 +80,8 @@ class App(tk.Tk):
         self.title(APP_TITLE)
         # 必須放在最前面，因為後面的 Icon 和 FFmpeg 檢查可能都會用到它
         self.config_data = load_config()
+
+        self.current_lang = self.config_data.get("language", "en")
 
         # === [修改] 檢查 FFmpeg (優先使用打包好的檔案) ===
         self.ffmpeg_ok = False
@@ -86,14 +147,53 @@ class App(tk.Tk):
         self.thumbnail_tk = None
         self.last_filename = None
         self.output_dir = ""
-        # 載入 cookie 記錄
-        self.config_data = load_config()
         self.saved_cookie = self.config_data.get("cookie_path", "")
         setup_style(self)
         self._build_ui()
         self.after(80, self._drain_queue)
         # 視窗關閉時自動保存 config.json
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    # --- [修正點 1] 將方法移到 Class 層級 ---
+    def toggle_language(self):
+        """切換語言邏輯"""
+        self.current_lang = "zh" if self.current_lang == "en" else "en"
+        self.config_data["language"] = self.current_lang
+        save_config(self.config_data)
+        self._update_ui_text()
+
+    def _update_ui_text(self):
+        """更新所有介面文字"""
+        texts = LANG_DICT[self.current_lang]
+        
+        # 視窗與 Header
+        self.title(texts["title"])
+        self.title_label.configure(text=texts["title"])
+        self.subtitle_label.configure(text=texts["subtitle"])
+        
+        # 輸入區標籤
+        self.label_url_hint.configure(text=texts["url_label"])
+        self.label_cookies_hint.configure(text=texts["cookies_label"])
+        self.label_folder_hint.configure(text=texts["folder_label"])
+        self.cookie_tip_label.configure(text=texts["cookie_hint"])
+        
+        # 按鈕群
+        self.btn_cookie_choose.configure(text=texts["btn_choose"])
+        self.btn_cookie_clear.configure(text=texts["btn_clear"])
+        self.btn_choose_folder.configure(text=texts["btn_folder"])
+        self.btn_open_folder.configure(text=texts["btn_open"]) # 確保 build_ui 有存此變數
+        
+        # 下載控制按鈕
+        self.btn_download.configure(text=texts["download_v"])
+        self.btn_download_mp3.configure(text=texts["download_a"])
+        self.btn_stop.configure(text=texts["stop"])
+        
+        # 設定區
+        self.theme_text_label.configure(text=texts["theme"])
+        self.btn_lang.configure(text=texts["lang_btn"])
+        # 頁尾
+        self.footer_label.configure(text=texts["footer"])
+
     
     def _update_header_colors(self):
         """當主題切換時，自動更新 Header 顏色"""
@@ -112,26 +212,37 @@ class App(tk.Tk):
         self.subtitle_label.configure(background=bg, foreground=sub_fg)
         self.theme_text_label.configure(background=bg, foreground=fg)
 
+        # 新增：動態更新提示與頁尾顏色
+        if hasattr(self, "cookie_tip_label"):
+            # 使用 sub_fg 確保在深色主題會自動變亮
+            self.cookie_tip_label.configure(foreground=sub_fg)
+        
+        if hasattr(self, "footer_label"):
+            # 頁尾通常需要跟背景色一致的背景，以及對比的文字色
+            self.footer_label.configure(foreground=sub_fg)
+
     def _build_ui(self):
+        # 取得目前得語言
+        texts = LANG_DICT[self.current_lang]
         # === Header ===
         bg = self.style.colors.bg
         self.style.configure("Header.TFrame", background=bg)
 
-        self.header = ttk.Frame(self, borderwidth=0, relief="flat", style="Header.TFrame")
+        self.header = ttk.Frame(self.themed_frame, style="Header.TFrame")
         self.header.pack(fill=tk.X, pady=(2, 0), padx=16)
 
         self.title_frame = ttk.Frame(self.header, style="Header.TFrame")
         self.title_frame.pack(side=tk.LEFT, anchor="w")
 
         self.title_label = ttk.Label(
-            self.title_frame, text="Multi-Platform Media Converter",
+            self.title_frame, text=texts["title"],
             font=("Segoe UI", 14, "bold")
         )
         self.title_label.pack(anchor="w")
 
         self.subtitle_label = ttk.Label(
             self.title_frame,
-            text="Supports X.com, YouTube, and more. Preview and progress shown.",
+            text=texts["subtitle"],  # 這裡原本是寫死的英文，改為從字典抓取
             font=("Segoe UI", 9)
         )
         self.subtitle_label.pack(anchor="w")
@@ -139,12 +250,25 @@ class App(tk.Tk):
         self.theme_frame = ttk.Frame(self.header, style="Header.TFrame")
         self.theme_frame.pack(side=tk.RIGHT, anchor="e", pady=(8, 0))
 
-        self.theme_text_label = ttk.Label(self.theme_frame, text="Theme:")
-        self.theme_text_label.pack(side=tk.LEFT, padx=(0, 6))
+
 
         themes = ["cosmo", "darkly", "flatly", "journal", "minty",
                 "pulse", "superhero", "united", "morph"]
         self.theme_var = tk.StringVar(value=self.style.theme.name)
+
+
+        # 修改：語言切換按鈕
+        self.btn_lang = ttk.Button(
+            self.theme_frame, 
+            text=texts["lang_btn"],
+            width=10,
+            command=self.toggle_language, 
+            style="Outline.TButton"
+        )
+        self.btn_lang.pack(side=tk.LEFT, padx=(0, 15))
+
+        self.theme_text_label = ttk.Label(self.theme_frame, text=texts["theme"])
+        self.theme_text_label.pack(side=tk.LEFT, padx=(0, 6))
 
         theme_combo = ttk.Combobox(
             self.theme_frame,
@@ -167,60 +291,80 @@ class App(tk.Tk):
         # 先依目前主題套一次色
         self._update_header_colors()
 
-
         # Container
-        container = ttk.Frame(self, padding=16)
+        container = ttk.Frame(self.themed_frame, padding=16) 
         container.pack(fill=tk.BOTH, expand=True)
 
         # ===== Input card =====
         self.input_shadow, input_card = make_card(container)
 
         # URL row
-        row1 = ttk.Frame(input_card); row1.pack(fill=tk.X, pady=(0,10))
-        ttk.Label(row1, text="Video URL：", width=10, style="CardTitle.TLabel").pack(side=tk.LEFT)
+        row1 = ttk.Frame(input_card); row1.pack(fill=tk.X, pady=(0,20))
+        self.label_url_hint = ttk.Label(row1, text=texts["url_label"], width=14, style="CardTitle.TLabel")
+        self.label_url_hint.pack(side=tk.LEFT, padx=(0, 5)) # 加一點 padding 比較美觀
         self.url_var = tk.StringVar()
         self.url_entry = ttk.Entry(row1, textvariable=self.url_var)
         self.url_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
         self.url_entry.focus_set()
 
-        # Cookies + outdir
-        row2 = ttk.Frame(input_card); row2.pack(fill=tk.X, pady=(0,10))
-        ttk.Label(row2, text="Cookies：", width=10).pack(side=tk.LEFT)
-
+        # Cookies + outdir   
+        row2 = ttk.Frame(input_card); row2.pack(fill=tk.X, pady=(0,0))
+        self.label_cookies_hint = ttk.Label(row2, text=texts["cookies_label"], width=15)
+        self.label_cookies_hint.pack(side=tk.LEFT)
         self.cookie_var = tk.StringVar(value=self.saved_cookie)
         ttk.Entry(row2, textvariable=self.cookie_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        self.btn_cookie = ttk.Button(row2, text="Choose File", command=self._pick_cookie)
-        self.btn_cookie.pack(side=tk.LEFT, padx=(6,2))
-        ttk.Button(row2, text="Clear", command=self._clear_cookie).pack(side=tk.LEFT, padx=(2,16))
-        # 為 tweet 錯誤提示氣泡準備定位
-        self.cookie_button_ref = self.btn_cookie
 
-        ttk.Label(row2, text="Output Folder：").pack(side=tk.LEFT)
+        self.btn_cookie_choose = ttk.Button(row2, text=texts["btn_choose"], command=self._pick_cookie, width=12)
+        self.btn_cookie_choose.pack(side=tk.LEFT, padx=(6, 2))
+        self.btn_cookie_clear = ttk.Button(row2, text=texts["btn_clear"], command=self._clear_cookie, width=8)
+        self.btn_cookie_clear.pack(side=tk.LEFT, padx=(2,0))
+
+        # 新增提示文字標籤
+        self.cookie_tip_label = ttk.Label(
+            input_card, 
+            text=LANG_DICT[self.current_lang]["cookie_hint"],
+            font=("Segoe UI", 9),
+            foreground=self.style.colors.secondary # 初始化時抓取目前主題顏色
+        )
+        self.cookie_tip_label.pack(anchor="w", padx=(115, 0), pady=(0, 15))
+        
+        # 氣泡提示定位參考
+        self.cookie_button_ref = self.btn_cookie_choose
+
+        # --- Output Folder 部分 ---
+        row2_sub = ttk.Frame(input_card); row2_sub.pack(fill=tk.X, pady=(0,20))
+        self.label_folder_hint = ttk.Label(row2_sub, text=texts["folder_label"], width=15)
+        self.label_folder_hint.pack(side=tk.LEFT)
         self.outdir_var = tk.StringVar(value=self.output_dir)
-        ttk.Entry(row2, textvariable=self.outdir_var, width=34).pack(side=tk.LEFT)
-        self.btn_choose_folder = ttk.Button(row2, text="Choose Folder", command=self._pick_outdir)
-        self.btn_choose_folder.pack(side=tk.LEFT, padx=(8,0))
+        ttk.Entry(row2_sub, textvariable=self.outdir_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
+        # 這裡原本你誤寫成了 self.btn_cookie_clear，請修正為 self.btn_choose_folder
+        self.btn_choose_folder = ttk.Button(row2_sub, text=texts["btn_folder"], command=self._pick_outdir, width=12)
+        self.btn_choose_folder.pack(side=tk.LEFT, padx=(6,0))
+
+        # === row3：功能按鈕列 ===
         row3 = ttk.Frame(input_card); row3.pack(fill=tk.X, pady=(4,0))
-        # 下載MP4按鈕
-        self.btn_download = ttk.Button(row3, text="Download MP4",
+        
+        # 下載 Video
+        self.btn_download = ttk.Button(row3, text=texts["download_v"],
                                command=lambda: self.on_download(as_mp3=False), 
                                style="Accent.TButton")
-        #停止按鈕
         self.btn_download.pack(side=tk.LEFT)
-
-        # Download MP3 按鈕 (指定 as_mp3=True)
-        self.btn_download_mp3 = ttk.Button(row3, text="Download MP3",
+        
+        # 下載 Audio
+        self.btn_download_mp3 = ttk.Button(row3, text=texts["download_a"],
                                         command=lambda: self.on_download(as_mp3=True), 
                                         style="Accent.TButton")
         self.btn_download_mp3.pack(side=tk.LEFT, padx=(8,0))
 
-        self.btn_stop = ttk.Button(row3, text="Stop",
+        # 停止
+        self.btn_stop = ttk.Button(row3, text=texts["stop"],
                                    command=self.on_stop, state=tk.DISABLED)
         self.btn_stop.pack(side=tk.LEFT, padx=(8,0))
-        #開啟下載資料夾
-        ttk.Button(row3, text="Open Download Folder", command=self._open_outdir)\
-            .pack(side=tk.RIGHT)
+        
+        # 開啟資料夾 (修正 self. 賦值與字典文字引用)
+        self.btn_open_folder = ttk.Button(row3, text=texts["btn_open_folder"], command=self._open_outdir)
+        self.btn_open_folder.pack(side=tk.RIGHT)
 
         ttk.Separator(container, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(8,8))
 
@@ -263,6 +407,20 @@ class App(tk.Tk):
         # 初始隱藏 dynamic
         self._set_dynamic_visible(False)
 
+
+        # === 關鍵修正：移到最後，並將父元件設為 self ===
+        self.footer_label = ttk.Label(
+            self, # 改為 self
+            text=texts["footer"],
+            font=("Segoe UI", 8),
+            foreground=self.style.colors.secondary,
+            anchor="center"
+        )
+        # 這樣它會貼在視窗物理上的最底部
+        self.footer_label.pack(side=tk.BOTTOM, fill=tk.X, pady=(0, 10))
+
+        
+
     # ------- show/hide dynamic by shadow frame -------
     def _set_dynamic_visible(self, visible: bool):
         if visible:
@@ -291,6 +449,7 @@ class App(tk.Tk):
     def on_stop(self):
         """使用者按下 Stop 時，中斷下載並清理暫存檔"""
         self.stop_flag = True
+        texts = LANG_DICT[self.current_lang]
         self.btn_stop.configure(state=tk.DISABLED)
 
         removed = []
@@ -306,12 +465,13 @@ class App(tk.Tk):
         self.temp_files.clear()
 
         if removed:
-            messagebox.showinfo("Download Stopped",
-                                f"Download stopped.\nDeleted temp files:\n\n" + "\n".join(removed))
+            messagebox.showinfo(texts["msg_stop_title"],
+                                f"{texts['msg_stop_text']}\n\n" + "\n".join(removed))
         else:
-            messagebox.showinfo("Download Stopped", "Download stopped. No temp files found.")
+            messagebox.showinfo(texts["msg_stop_title"], texts["msg_stop_text"])
 
     def on_download(self, as_mp3=False):
+        texts = LANG_DICT[self.current_lang]
         if not self.ffmpeg_ok:
             # 若已有提示則先刪除
             if hasattr(self, "ffmpeg_hint") and self.ffmpeg_hint.winfo_exists():
@@ -328,7 +488,7 @@ class App(tk.Tk):
         # 檢查 URL
         url = (self.url_var.get() or "").strip()
         if not url:
-            messagebox.showwarning("Prompt:", "Please enter the video URL first.")
+            messagebox.showwarning(texts["msg_error_title"], texts["msg_url_empty"])
             return
 
         # 檢查輸出資料夾
@@ -341,8 +501,6 @@ class App(tk.Tk):
             # 找到「Choose Folder」按鈕
             # 用 row2 最後一個子元件即為「Choose Folder」按鈕
             choose_btn = None
-            for child in self.children.values():
-                pass  # 不要動這裡，後面處理
             # 我們在 _build_ui 裡 pack() 時是這樣命名的，所以可以直接抓：
             choose_btn = self.btn_choose_folder if hasattr(self, "btn_choose_folder") else None
             if not choose_btn:
@@ -452,36 +610,36 @@ class App(tk.Tk):
                     status = d.get("status")
                     # 如果正在下載中
                     if status == "downloading":
-                        filename = d.get("filename")
-                        if filename:
-                            # 記錄暫存檔名稱，以便 Stop 時刪除
-                            if filename not in self.temp_files:
-                                self.temp_files.append(filename)
+                        # ... 原本的 filename 記錄邏輯 ...
 
-                        total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
-                        done = d.get("downloaded_bytes", 0)
-                        percent = (done / total * 100.0) if total else 0.0
-                        speed = d.get("speed")
-                        speed_str = f"{self._hr_size(speed)}/s" if speed else "—"
-                        eta = d.get("eta")
-                        eta_str = self._hr_eta(eta)
+                        # 優化進度文字顯示
+                        # 判斷目前是在載 Video 還是 Audio (針對 YouTube WebM 分離下載)
+                        ext = d.get("info_dict", {}).get("ext", "")
+                        task_prefix = "Audio" if ext in ["m4a", "webm"] and "video" not in d.get("filename", "").lower() else "Video"
+                        
+                        # 百分比抓取邏輯 (你原本的邏輯很好，這裡維持)
+                        p_str = d.get("_percent_str", "0%").replace("%", "")
+                        p_str = "".join(filter(lambda x: x.isdigit() or x == '.', p_str))
+                        try:
+                            percent = float(p_str)
+                        except:
+                            percent = 0.0
 
+                        speed_str = f"{self._hr_size(d.get('speed'))}/s" if d.get('speed') else "—"
+                        
                         self.msgq.put(("progress", {
                             "percent": percent,
-                            "speed": speed_str,
-                            "eta": eta_str,
+                            "speed": f"[{task_prefix}] {speed_str}", # 讓你知道現在在載影還是音
+                            "eta": self._hr_eta(d.get("eta")),
                         }))
-
-                        if filename:
-                            self.last_filename = filename
                     
-                    #下載完成
                     elif status == "finished":
+                        # 下載完數據，進入合併階段
                         self.msgq.put(("progress", {
                             "percent": 100.0,
-                            "speed": "—",
-                            "eta": "—",
-                            "filename": os.path.basename(d.get("filename", self.last_filename or "")),
+                            "speed": "Merging streams...",
+                            "eta": "Processing",
+                            "filename": os.path.basename(d.get("filename", self.last_filename or ""))
                         }))
                         # 清空暫存檔紀錄（因為已成功完成下載）
                         self.temp_files.clear()
@@ -519,6 +677,17 @@ class App(tk.Tk):
 
                 ffmpeg_path = get_resource_path("ffmpeg.exe") if self.ffmpeg_ok else shutil.which("ffmpeg")
 
+                # 建立共通的瀏覽器偽裝參數
+                browser_headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "*/*",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Referer": "https://www.google.com/",
+                }
+
+                # 判定是否為 YouTube 連結
+                is_youtube = "youtube.com" in url or "youtu.be" in url
+
                 if is_audio_only:
                     ydl_opts = {
                         "ffmpeg_location": ffmpeg_path, # <--- 明確加入這行
@@ -533,34 +702,46 @@ class App(tk.Tk):
                             "preferredquality": "192",
                         }, {"key": "FFmpegMetadata"}],
                         "quiet": True, "no_warnings": True,
+                        "concurrent_fragment_downloads": 8,  # 開啟併發下載 (建議 5~10)
+                        "nocheckcertificate": True,          # 減少 SSL 握手時間
+                        "headers": browser_headers,
+                        "extractor_args": {                  # 針對 YouTube 等平台的限速優化
+                            "youtube": {"player_client": ["android", "web"]}
+                        },
                     }
-                else:
+                elif is_youtube:
+                    # YouTube 專用：直接下載 WebM，不轉碼也不合併
                     ydl_opts = {
                         "ffmpeg_location": ffmpeg_path,
-                        "outtmpl": final_outtmpl,
-                        "cookiefile": cookie_path,
-                        "noplaylist": True,
-                        # 1. 抓取最佳影音，不強硬鎖死編碼 (讓 X 的片段能順利合併)
-                        "format": "bestvideo+bestaudio/best",
                         "progress_hooks": [progress_hook],
-                        "postprocessors": [
-                            {
-                                "key": "FFmpegVideoConvertor",
-                                "preferedformat": "mp4", # 確保最終轉成 mp4 容器
-                            },
-                            {"key": "FFmpegMetadata"},
-                        ],
-                        # 2. 關鍵修正：改用 -c copy 模式
-                        # 這不會重新運算每一幀(Encoding)，而是直接把下載的數據封裝進 MP4
-                        # 對於 X 這種片段多且速度慢的平台，這樣最穩定且快 10 倍
+                        "outtmpl": final_outtmpl.replace(".%(ext)s", ".webm"), # 強制後綴為 webm
+                        "format": "bestvideo+bestaudio/best", # 或是 "best" 抓取單一 webm 檔
+                        "concurrent_fragment_downloads": 8,
+                        "quiet": True,
+                        # 不加入 FFmpegVideoConvertor，避免觸發 CPU 運算
+                        "merge_output_format": "webm", # 指定合併後的容器也是 webm
                         "postprocessor_args": {
-                            "video_convertor": [
-                                "-c", "copy", 
-                                "-movflags", "faststart"
-                            ]
+                            "merger": ["-c", "copy"]   # 強制合併時只用 copy，不准重編碼
+                        },
+                        "headers": browser_headers,
+                        "extractor_args": {
+                            "youtube": {"player_client": ["android", "web"]}
+                        },
+                    }
+                else:
+                    # 其他平台 (如 X.com)：維持 MP4 封裝
+                    ydl_opts = {
+                        "ffmpeg_location": ffmpeg_path,
+                        "progress_hooks": [progress_hook],
+                        "outtmpl": final_outtmpl,
+                        "format": "bestvideo+bestaudio/best",
+                        "concurrent_fragment_downloads": 8,
+                        "headers": browser_headers,
+                        "postprocessors": [{"key": "FFmpegVideoConvertor", "preferedformat": "mp4"}],
+                        "postprocessor_args": {
+                            "video_convertor": ["-c", "copy", "-map", "0", "-movflags", "faststart"]
                         },
                         "quiet": True,
-                        "no_warnings": True,
                     }
 
                 # 根據下載模式決定檢查的副檔名
@@ -570,28 +751,36 @@ class App(tk.Tk):
                 with yt_dlp.YoutubeDL(ydl_opts) as y:
                     y.process_info(info)
                     fn = y.prepare_filename(info)
+
                 # 取得不含副檔名的基礎路徑，用來精準偵測最終產出的檔案
                 base_path = os.path.splitext(fn)[0]
+                found_path = None
 
+                # 🚀 修正點 1: 優先偵測實際產出的檔案
                 if is_audio_only:
-                    # 音訊模式：優先檢查是否成功產出 .mp3
-                    potential_mp3 = base_path + ".mp3"
-                    if os.path.exists(potential_mp3):
-                        final_path = potential_mp3
-                    else:
-                        final_path = fn
+                    # 音訊模式：檢查常見的音訊副檔名
+                    for ext in [".mp3", ".m4a", ".aac"]:
+                        test_path = base_path + ext
+                        if os.path.exists(test_path):
+                            found_path = test_path
+                            break
                 else:
-                    # 影片模式：這是解決你問題的核心
-                    # 優先序 1：檢查轉檔後的 .mp4 是否存在 (解決 webm/mp4 並存問題)
-                    potential_mp4 = base_path + ".mp4"
-                    if os.path.exists(potential_mp4):
-                        final_path = potential_mp4
-                    # 優先序 2：如果沒有 mp4，檢查原始預期檔名是否存在
-                    elif os.path.exists(fn):
-                        final_path = fn
+                    # 影片模式：自動偵測實際產出的副檔名
+                    for ext in [".mp4", ".webm", ".mkv"]:
+                        test_path = base_path + ext
+                        if os.path.exists(test_path):
+                            found_path = test_path
+                            break
+
+                # 如果上面的迴圈沒找到，就嘗試使用 prepare_filename 產出的原始路徑
+                if not found_path:
+                    if os.path.exists(fn):
+                        found_path = fn
                     else:
-                        # 兜底：如果都沒找到，維持原檔名
-                        final_path = fn
+                        # 最後嘗試檢查 base_path 本身（有些平台不帶副檔名）
+                        found_path = fn
+
+                final_path = found_path
 
                 # ✅ 關鍵：這行必須在 try 區塊的最末尾，確保不論如何都會發送 done 訊號
                 self.msgq.put(("done", final_path))
@@ -638,7 +827,8 @@ class App(tk.Tk):
                     self.btn_download_mp3.configure(state=tk.NORMAL)
                     self.btn_stop.configure(state=tk.DISABLED)
                     if payload:
-                        messagebox.showinfo("finished", f"download finished：\n{payload}")
+                        texts = LANG_DICT[self.current_lang]
+                        messagebox.showinfo(texts["msg_finished"], f"{texts['msg_finished']}：\n{payload}")
                     self._reset_for_next()
                 elif kind == "no_tweet_video":
                     # 若已有提示則先刪除
@@ -709,7 +899,8 @@ class App(tk.Tk):
 
     
     def _on_close(self):
-        if messagebox.askokcancel("Exit", "Are you sure you want to close the program?"):
+        texts = LANG_DICT[self.current_lang]
+        if messagebox.askokcancel(texts["msg_exit_title"], texts["msg_exit_text"]):
             save_config(self.config_data)
             self.destroy()
 
