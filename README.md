@@ -1,4 +1,4 @@
-# Comma
+# 專案介紹
 
 一款基於 **Python + Tkinter + yt_dlp + FFmpeg** 的桌面應用程式，  
 可將 X（前身為 Twitter）影片自動下載並轉換為MP4檔案。  
